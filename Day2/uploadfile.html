@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FastData File Processor</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: grid;
+            place-items: center;
+            padding: 20px;
+            background: #f7f9fc;
+            color: #172033;
+            font-family: Arial, Helvetica, sans-serif;
+        }
+        .container {
+            width: min(100%, 520px);
+            padding: 28px;
+            background: #fff;
+            border: 1px solid #d8dee9;
+            border-radius: 8px;
+            text-align: center;
+        }
+        h1 { margin: 0 0 8px; font-size: 30px; }
+        .subtitle { margin: 0 0 24px; color: #64748b; }
+        .upload-area {
+            padding: 36px 20px;
+            border: 2px dashed #b8c2d1;
+            border-radius: 8px;
+            cursor: pointer;
+            background: #fafcff;
+        }
+        .upload-area.dragover { border-color: #2563eb; background: #eef5ff; }
+        .upload-icon { width: 44px; height: 44px; stroke: #2563eb; fill: none; }
+        .upload-text { margin-top: 10px; font-weight: 700; }
+        .upload-hint { margin-top: 6px; color: #64748b; font-size: 14px; }
+        #file-input { display: none; }
+        .file-info {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 16px;
+            padding: 12px;
+            border: 1px solid #d8dee9;
+            border-radius: 8px;
+        }
+        .file-name { word-break: break-all; }
+        .remove-file { border: 0; background: transparent; color: #b91c1c; cursor: pointer; font-size: 22px; }
+        .submit-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            margin-top: 16px;
+            padding: 13px 16px;
+            border: 0;
+            border-radius: 8px;
+            background: #2563eb;
+            color: white;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .submit-btn:disabled { opacity: .55; cursor: not-allowed; }
+        .spinner {
+            display: none;
+            width: 16px;
+            height: 16px;
+            margin-left: 8px;
+            border: 2px solid rgba(255,255,255,.4);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin .7s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .message { display: none; margin-top: 16px; padding: 12px; border-radius: 8px; }
+        .message.show { display: block; }
+        .message.success { color: #047857; background: #ecfdf5; }
+        .message.error { color: #b91c1c; background: #fef2f2; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Data Processor</h1>
+        <p class="subtitle">Upload your CSV or Excel file for instant processing</p>
+
+        <form id="upload-form">
+            <div class="upload-area" id="drop-zone">
+                <svg class="upload-icon" viewBox="0 0 24 24">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="17 8 12 3 7 8"></polyline>
+                    <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                <div class="upload-text">Drag & Drop your file here</div>
+                <div class="upload-hint">or click to browse (.csv, .xlsx, .xls)</div>
+                <input type="file" id="file-input" accept=".csv, .xlsx, .xls" required>
+            </div>
+
+            <div class="file-info" id="file-info">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#172033" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                    <polyline points="10 9 9 9 8 9"></polyline>
+                </svg>
+                <span class="file-name" id="file-name">filename.csv</span>
+                <button type="button" class="remove-file" id="remove-file" title="Remove file">x</button>
+            </div>
+
+            <button type="submit" class="submit-btn" id="submit-btn" disabled>
+                <span class="btn-text">Process File</span>
+                <div class="spinner" id="spinner"></div>
+            </button>
+        </form>
+
+        <div class="message" id="message"></div>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const fileInfo = document.getElementById('file-info');
+        const fileName = document.getElementById('file-name');
+        const removeBtn = document.getElementById('remove-file');
+        const submitBtn = document.getElementById('submit-btn');
+        const uploadForm = document.getElementById('upload-form');
+        const spinner = document.getElementById('spinner');
+        const btnText = document.querySelector('.btn-text');
+        const messageEl = document.getElementById('message');
+
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+            document.body.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, highlight, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, unhighlight, false);
+        });
+
+        function highlight(e) {
+            dropZone.classList.add('dragover');
+        }
+
+        function unhighlight(e) {
+            dropZone.classList.remove('dragover');
+        }
+
+        dropZone.addEventListener('drop', handleDrop, false);
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            handleFiles(files);
+        }
+
+        dropZone.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        fileInput.addEventListener('change', function() {
+            handleFiles(this.files);
+        });
+
+        function handleFiles(files) {
+            if (files.length > 0) {
+                const file = files[0];
+                const validTypes = ['.csv', '.xlsx', '.xls'];
+                const fileExt = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+
+                if (validTypes.includes(fileExt)) {
+                    fileInput.files = files;
+                    fileName.textContent = file.name;
+                    dropZone.style.display = 'none';
+                    fileInfo.style.display = 'flex';
+                    submitBtn.classList.add('active');
+                    submitBtn.disabled = false;
+                    hideMessage();
+                } else {
+                    showMessage('Invalid file type. Please upload a CSV or Excel file.', 'error');
+                }
+            }
+        }
+
+        removeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            fileInput.value = '';
+            dropZone.style.display = 'block';
+            fileInfo.style.display = 'none';
+            submitBtn.classList.remove('active');
+            submitBtn.disabled = true;
+            hideMessage();
+        });
+
+        function showMessage(text, type) {
+            messageEl.textContent = text;
+            messageEl.className = `message ${type} show`;
+        }
+
+        function hideMessage() {
+            messageEl.className = 'message';
+        }
+
+        uploadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const file = fileInput.files[0];
+            if (!file) return;
+
+            btnText.textContent = 'Processing...';
+            spinner.style.display = 'block';
+            submitBtn.disabled = true;
+            submitBtn.style.opacity = '0.8';
+            submitBtn.style.pointerEvents = 'none';
+            removeBtn.style.display = 'none';
+            hideMessage();
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.detail || 'An error occurred during processing.');
+                }
+
+                let downloadFilename = `processed_${file.name}`;
+                const disposition = response.headers.get('Content-Disposition');
+                if (disposition && disposition.indexOf('attachment') !== -1) {
+                    const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
+                    const matches = filenameRegex.exec(disposition);
+                    if (matches != null && matches[1]) { 
+                        downloadFilename = matches[1].replace(/['"]/g, '');
+                    }
+                }
+
+                const blob = await response.blob();
+                const downloadUrl = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = downloadUrl;
+                a.download = downloadFilename;
+                document.body.appendChild(a);
+                a.click();
+                
+                window.URL.revokeObjectURL(downloadUrl);
+                document.body.removeChild(a);
+
+                showMessage('File downloaded successfully.', 'success');
+                
+                setTimeout(() => {
+                    fileInput.value = '';
+                    dropZone.style.display = 'block';
+                    fileInfo.style.display = 'none';
+                    submitBtn.classList.remove('active');
+                    submitBtn.disabled = true;
+                    removeBtn.style.display = 'block';
+                }, 3000);
+
+            } catch (error) {
+                showMessage(error.message, 'error');
+                removeBtn.style.display = 'block';
+                submitBtn.disabled = false;
+            } finally {
+                btnText.textContent = 'Process File';
+                spinner.style.display = 'none';
+                submitBtn.style.opacity = '';
+                submitBtn.style.pointerEvents = '';
+            }
+        });
+    </script>
+</body>
+</html>
